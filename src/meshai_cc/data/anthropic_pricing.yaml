@@ -1,12 +1,22 @@
 # Bundled fallback rates (USD per 1K tokens) used when the pricing endpoint
 # is unreachable. The live source of truth is GET /api/v1/pricing/anthropic.
+# Rates verified against platform.claude.com 2026-07-06.
 models:
   claude-fable-5:
-    input_price_per_1k: "0.030"
-    output_price_per_1k: "0.150"
+    input_price_per_1k: "0.010"
+    output_price_per_1k: "0.050"
+  claude-opus-4-8:
+    input_price_per_1k: "0.005"
+    output_price_per_1k: "0.025"
+  claude-opus-4-7:
+    input_price_per_1k: "0.005"
+    output_price_per_1k: "0.025"
   claude-opus-4-6:
-    input_price_per_1k: "0.015"
-    output_price_per_1k: "0.075"
+    input_price_per_1k: "0.005"
+    output_price_per_1k: "0.025"
+  claude-sonnet-5:
+    input_price_per_1k: "0.003"
+    output_price_per_1k: "0.015"
   claude-sonnet-4-6:
     input_price_per_1k: "0.003"
     output_price_per_1k: "0.015"
