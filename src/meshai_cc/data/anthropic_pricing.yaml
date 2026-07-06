@@ -1,0 +1,15 @@
+# Bundled fallback rates (USD per 1K tokens) used when the pricing endpoint
+# is unreachable. The live source of truth is GET /api/v1/pricing/anthropic.
+models:
+  claude-fable-5:
+    input_price_per_1k: "0.030"
+    output_price_per_1k: "0.150"
+  claude-opus-4-6:
+    input_price_per_1k: "0.015"
+    output_price_per_1k: "0.075"
+  claude-sonnet-4-6:
+    input_price_per_1k: "0.003"
+    output_price_per_1k: "0.015"
+  claude-haiku-4-5:
+    input_price_per_1k: "0.001"
+    output_price_per_1k: "0.005"
