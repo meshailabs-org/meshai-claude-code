@@ -1,5 +1,7 @@
 # meshai-claude-code
 
+[MeshAI](https://meshai.dev) &nbsp;·&nbsp; [Why durable telemetry](https://meshai.dev/blog/meshai-claude-code-durable-agent-telemetry) &nbsp;·&nbsp; [PyPI](https://pypi.org/project/meshai-claude-code/)
+
 OTel-native MeshAI connector for Claude Code: durable, evidence-grade
 telemetry for AI coding agent activity, aimed at EU AI Act Article 12
 record-keeping. Every hook event is fsynced to a local write-ahead log
