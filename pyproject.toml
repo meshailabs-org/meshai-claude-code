@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "meshai-claude-code"
+version = "0.1.0"
+description = "OTel-native MeshAI connector for Claude Code — durable, evidence-grade telemetry for AI coding agent activity"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "MeshAI Labs" }]
+dependencies = [
+    "meshai-sdk[tracer]>=0.4.0",
+    "httpx>=0.25.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+meshai-claude-code = "meshai_cc.cli:main"
+meshai-cc-hook = "meshai_cc.hooks:main"
+meshai-cc-daemon = "meshai_cc.daemon:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "hypothesis>=6.100.0",
+    "ruff>=0.8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meshai_cc"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
