@@ -1,8 +1,8 @@
 """WAL event construction from Claude Code hook payloads.
 
 IDs are deterministic where replay-safety needs them to be:
-- trace_id  = sha256("meshai-cc:" + session_id)[:32] — one trace per session
-- root span = sha256("meshai-cc:root:" + session_id)[:16] — children parent
+- trace_id  = sha256("meshai-cc:" + session_id)[:32]; one trace per session
+- root span = sha256("meshai-cc:root:" + session_id)[:16]; children parent
   to it even though it's emitted by a different hook process
 - event span_id = random 8 bytes, minted ONCE at hook time and persisted in
   the WAL, so a daemon replay re-exports the same id and the server dedups.

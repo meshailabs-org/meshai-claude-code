@@ -59,7 +59,7 @@ def install(claude_dir: Path | None = None) -> str:
         _atomic_write(path, settings)
     except Exception:
         if backup is not None:
-            shutil.copy2(backup, path)  # roll back — never leave it half-edited
+            shutil.copy2(backup, path)  # roll back; never leave it half-edited
         raise
     return (
         f"registered hooks: {', '.join(added) or '(already installed)'}"
@@ -128,7 +128,7 @@ def status(root: Path | None = None) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> None:  # pragma: no cover — shim
+def main(argv: list[str] | None = None) -> None:  # pragma: no cover; shim
     parser = argparse.ArgumentParser(prog="meshai-claude-code")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("install")

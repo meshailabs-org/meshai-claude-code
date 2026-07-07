@@ -1,17 +1,17 @@
 """Write-ahead log: the load-bearing durability primitive.
 
 Outbox pattern: hooks fsync events HERE first, then (separately) nudge the
-daemon. The daemon is a pure reader — hooks own all writes, including
+daemon. The daemon is a pure reader; hooks own all writes, including
 rotation. Only disk failure can lose an acked event.
 
-Line format: ``{crc32:08x} {json}\n`` — CRC over the JSON bytes detects torn
+Line format: ``{crc32:08x} {json}\n``; CRC over the JSON bytes detects torn
 writes from a hook killed mid-append. Readers resync at the next newline and
 count the damage; writers terminate a torn tail before appending so one
 crash never corrupts the following record.
 
 Durability details (locked design):
 - macOS fsync does not reach the platter; use F_FULLFSYNC (D2 eng).
-- New segment files are followed by a parent-directory fsync (T3.7) —
+- New segment files are followed by a parent-directory fsync (T3.7);
   otherwise the file itself can vanish on power loss.
 - Rotation creates the next segment with O_CREAT|O_EXCL so two racing hooks
   cannot both create it (T3.6); losers fall back to opening the winner's.
@@ -38,7 +38,7 @@ _FILE_MODE = 0o600
 
 
 def _fsync(fd: int) -> None:
-    if sys.platform == "darwin":  # pragma: no cover — macOS only
+    if sys.platform == "darwin":  # pragma: no cover; macOS only
         fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
     else:
         os.fsync(fd)
@@ -120,7 +120,7 @@ def current_segment(wal_dir: Path, session_id: str) -> Path:
 def append_event(wal_dir: Path, session_id: str, event: dict) -> Path:
     """Durably append one event; returns the segment written.
 
-    Raises on failure — the CALLER decides fail-open vs fail-closed
+    Raises on failure; the CALLER decides fail-open vs fail-closed
     (policy.fail_closed), because that decision belongs to the hook.
     """
     segment = current_segment(wal_dir, session_id)
@@ -172,7 +172,7 @@ def read_segment(path: Path, offset: int = 0) -> ReadResult:
     while True:
         newline = data.find(b"\n", cursor)
         if newline == -1:
-            break  # torn tail — do not advance past it
+            break  # torn tail; do not advance past it
         line = data[cursor:newline]
         cursor = newline + 1
         consumed = cursor
@@ -225,7 +225,7 @@ def load_offsets(path: Path) -> dict[str, int]:
 
 
 def save_offsets(path: Path, offsets: dict[str, int]) -> None:
-    """Atomic tmp+rename+fsync — a crash never leaves a half-written file."""
+    """Atomic tmp+rename+fsync; a crash never leaves a half-written file."""
     tmp = path.with_suffix(".tmp")
     fd = os.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, _FILE_MODE)
     try:

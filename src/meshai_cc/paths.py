@@ -1,6 +1,6 @@
 """Filesystem locations (XDG-style), all owner-only.
 
-The WAL lives under the *state* dir — it is a durability buffer, not config.
+The WAL lives under the *state* dir; it is a durability buffer, not config.
 Every path helper accepts an override root so tests never touch the real
 home directory.
 """

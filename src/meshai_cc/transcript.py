@@ -1,7 +1,7 @@
 """Extract per-turn LLM usage from a Claude Code transcript JSONL.
 
 Processed when a Stop event reaches the daemon. Streaming writes the same
-assistant message id across multiple entries as usage accumulates — the
+assistant message id across multiple entries as usage accumulates; the
 LAST entry per message id wins. Malformed lines are skipped; a transcript
 is user-owned input, never trusted.
 """

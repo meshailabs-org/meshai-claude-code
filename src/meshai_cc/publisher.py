@@ -2,7 +2,7 @@
 
 Spans are built as ReadableSpan objects (not the context-manager API)
 because replay needs explicit historical timestamps and the DETERMINISTIC
-ids minted at hook time — that determinism plus the server's UNIQUE
+ids minted at hook time; that determinism plus the server's UNIQUE
 (tenant_id, span_id) is what turns at-least-once delivery into
 exactly-once accounting. Export is synchronous and batched by us (not
 BatchSpanProcessor): offsets advance only after a successful export.

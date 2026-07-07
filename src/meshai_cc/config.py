@@ -29,7 +29,7 @@ def load_policy(root: Path | None = None) -> Policy:
 
     Note the asymmetry with filters.yaml: a broken FILTER config must fail
     closed (deny content), but a broken POLICY file failing "closed" would
-    mean blocking Claude Code — compliance mode is opt-in, never accidental.
+    mean blocking Claude Code; compliance mode is opt-in, never accidental.
     """
     path = config_dir(root) / "policy.yaml"
     if not path.exists():
