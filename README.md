@@ -16,15 +16,29 @@ locks do not hold. Native Windows support (TCP loopback) is v2.
 
 ## Install
 
+Install with [pipx](https://pipx.pypa.io). It puts the connector in its own
+isolated environment and exposes the `meshai-claude-code`, `meshai-cc-hook`,
+and `meshai-cc-daemon` commands on your PATH, which is what Claude Code needs
+to run the hooks.
+
 ```bash
-pip install meshai-claude-code
+pipx install meshai-claude-code
 meshai-claude-code login --api-key msh_...
 meshai-claude-code install     # registers hooks in ~/.claude/settings.json
 ```
 
+If you do not have pipx: `sudo apt install pipx` (or `brew install pipx`),
+then `pipx ensurepath` and restart your shell.
+
 The daemon starts automatically on the next Claude Code session
 (`auto_start_daemon: true`), or run `meshai-cc-daemon` yourself. Check
 health with `meshai-claude-code status`.
+
+> Plain `pip install meshai-claude-code` also works inside a virtual
+> environment. On a system Python it fails with
+> `error: externally-managed-environment` (PEP 668) on modern Debian, Ubuntu,
+> and Homebrew. Use pipx, a venv, or `pip install --break-system-packages` if
+> you understand the tradeoff.
 
 ## Architecture
 
