@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "meshai-claude-code"
 version = "0.1.0"
-description = "OTel-native MeshAI connector for Claude Code — durable, evidence-grade telemetry for AI coding agent activity"
+description = "OTel-native MeshAI connector for Claude Code: durable, evidence-grade telemetry for AI coding agent activity"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

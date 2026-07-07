@@ -6,7 +6,7 @@ OTel-native MeshAI connector for Claude Code: durable, evidence-grade
 telemetry for AI coding agent activity, aimed at EU AI Act Article 12
 record-keeping. Every hook event is fsynced to a local write-ahead log
 *before* anything else happens; a daemon publishes the WAL to MeshAI over
-OTLP. Daemon crash, OOM, or network outage cannot lose events — only disk
+OTLP. Daemon crash, OOM, or network outage cannot lose events. Only disk
 failure can.
 
 **Platforms (v1):** macOS, Linux, and WSL. On WSL the state directory must
@@ -39,7 +39,7 @@ health with `meshai-claude-code status`.
 - **Hooks** (`meshai-cc-hook <Event>`) are registered for SessionStart,
   UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, and Stop. Each one
   appends a CRC-framed record to the WAL with a real fsync (`F_FULLFSYNC`
-  on macOS) and exits — p99 under 50ms, CI-enforced.
+  on macOS) and exits, with a p99 under 50ms that CI enforces.
 - **The WAL** lives at `~/.local/state/meshai-cc/wal/` (owner-only). Hooks
   own writes and rotation; the daemon is a pure reader.
 - **The daemon** (one per user, PID-file flock) converts events to
@@ -78,7 +78,7 @@ agent_name: my-cc    # registry identity; default claude-code-<hostname>
 base_url: https://api.meshai.dev
 ```
 
-With `fail_closed: true`, no evidence means no action — a tool call that
+With `fail_closed: true`, no evidence means no action: a tool call that
 cannot be durably recorded does not run.
 
 ## Development

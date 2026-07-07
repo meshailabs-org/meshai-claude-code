@@ -2,12 +2,12 @@
 
 Invoked by Claude Code as ``meshai-cc-hook <EventName>`` with the hook JSON
 on stdin. The budget is <50ms p99 (D9 eng): one durable append and one
-non-blocking socket poke — no network, no regex, no imports of the OTel
+non-blocking socket poke; no network, no regex, no imports of the OTel
 stack.
 
 Failure posture (T7.5): default is fail-OPEN (exit 0, telemetry lost,
 Claude Code unbothered). With ``fail_closed: true`` in policy.yaml a WAL
-append failure exits 2, which blocks Claude Code — that is the point of
+append failure exits 2, which blocks Claude Code; that is the point of
 compliance mode: no evidence, no action.
 """
 
@@ -42,10 +42,10 @@ def maybe_start_daemon(root: Path | None = None) -> None:
     try:
         probe.acquire()
     except Exception:
-        return  # running (or unprobeable) — either way, not our job
+        return  # running (or unprobeable); either way, not our job
     probe.release()
     try:
-        subprocess.Popen(  # noqa: S603 — our own console script
+        subprocess.Popen(  # noqa: S603; our own console script
             [sys.executable, "-m", "meshai_cc.daemon"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -80,7 +80,7 @@ def run_hook(hook_event: str, stdin_text: str, root: Path | None = None) -> int:
     return 0
 
 
-def main() -> None:  # pragma: no cover — thin argv/stdin shim over run_hook
+def main() -> None:  # pragma: no cover; thin argv/stdin shim over run_hook
     if len(sys.argv) != 2 or sys.argv[1] not in HOOK_EVENTS:
         print(f"usage: meshai-cc-hook {{{'|'.join(HOOK_EVENTS)}}}", file=sys.stderr)
         raise SystemExit(0)  # never break Claude Code over a wiring mistake

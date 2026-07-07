@@ -2,8 +2,8 @@
 
 The WAL is THE load-bearing compliance piece: under any interleaving of
 appends, torn writes (crash mid-append), reader passes, and replays from
-stale offsets, every durably-appended event must be recoverable — exactly
-once per offset-advancing read, at least once under replay — and no
+stale offsets, every durably-appended event must be recoverable; exactly
+once per offset-advancing read, at least once under replay; and no
 corrupt bytes may ever surface as an event.
 """
 
@@ -62,7 +62,7 @@ def test_every_acked_event_survives_any_interleaving(tmp_path_factory, ops):
 @given(cut=st.integers(min_value=1, max_value=200), n=st.integers(1, 10))
 def test_replay_from_any_stale_offset_loses_nothing(tmp_path_factory, cut, n):
     """Offsets may lag arbitrarily (crash before save): replaying from any
-    earlier byte offset must yield a SUFFIX-superset — never skip an event
+    earlier byte offset must yield a SUFFIX-superset; never skip an event
     past the stale offset, never fabricate one."""
     wal_dir = tmp_path_factory.mktemp("wal")
     for i in range(n):

@@ -8,7 +8,7 @@ EU AI Act Article 12 record-keeping.
 
 - Hooks (`meshai-cc-hook`) fsync every Claude Code event to a local
   write-ahead log before anything else, so daemon crash, OOM, or network
-  outage cannot lose events — only disk failure can.
+  outage cannot lose events. Only disk failure can.
 - Single daemon (`meshai-cc-daemon`) tails the WAL and publishes
   OTLP/HTTP protobuf spans to MeshAI; offsets advance only after a
   successful export and span ids are minted once at hook time, so

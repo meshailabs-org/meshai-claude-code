@@ -4,7 +4,7 @@ on:
   release:
     types: [published]
 
-# Trusted publishing (OIDC) — no API token stored. The token is minted at
+# Trusted publishing (OIDC), no API token stored. The token is minted at
 # runtime from GitHub's identity and exchanged with PyPI.
 permissions:
   id-token: write

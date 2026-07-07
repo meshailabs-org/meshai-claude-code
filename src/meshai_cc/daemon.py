@@ -4,7 +4,7 @@ Pure reader of the WAL: hooks own writes; this process converts and ships.
 Startup order matters: filesystem safety check → PID lock → exporter.
 The loop wakes on a unix-socket nudge or the 1s polling backstop, exports
 new events per segment, and advances the committed offset ONLY after a
-successful OTLP export — a crash anywhere replays, and the server dedups.
+successful OTLP export; a crash anywhere replays, and the server dedups.
 
 Self-telemetry: status.json (read by `meshai-claude-code status`) plus a
 periodic daemon heartbeat span under service.name=meshai-claude-code-daemon.
@@ -72,7 +72,7 @@ class Daemon:
     def stop(self, *_args: object) -> None:
         self._running = False
 
-    def run_forever(self) -> None:  # pragma: no cover — loop shell; parts unit-tested
+    def run_forever(self) -> None:  # pragma: no cover; loop shell; parts unit-tested
         self.start_listener()
         last_gc = last_heartbeat = 0.0
         while self._running:
@@ -88,7 +88,7 @@ class Daemon:
             self._listener.close()
             socket_path(self._root).unlink(missing_ok=True)
 
-    def _wait_for_nudge(self) -> None:  # pragma: no cover — timing shell
+    def _wait_for_nudge(self) -> None:  # pragma: no cover; timing shell
         if self._listener is None:
             time.sleep(POLL_SECONDS)
             return
@@ -110,7 +110,7 @@ class Daemon:
             try:
                 result = wal.read_segment(segment, offset)
             except OSError:
-                continue  # GC'd or transient — next pass
+                continue  # GC'd or transient; next pass
             self._stats["corrupt_lines"] += result.corrupt_lines
             if not result.events and result.new_offset == offset:
                 continue
@@ -118,7 +118,7 @@ class Daemon:
             for event in result.events:
                 try:
                     spans.extend(self._publisher.spans_for_event(event))
-                except Exception:  # noqa: BLE001 — one bad event can't stall the WAL
+                except Exception:  # noqa: BLE001; one bad event can't stall the WAL
                     logger.warning("meshai-cc: unconvertible event", exc_info=True)
             if self._publisher.export(spans):
                 self._offsets[segment.name] = result.new_offset
@@ -128,7 +128,7 @@ class Daemon:
                 self._stats["last_flush_at"] = time.time()
             else:
                 self._stats["export_failures"] += 1
-                break  # endpoint down — retry the lot next tick
+                break  # endpoint down; retry the lot next tick
         self.write_status()
         return exported
 
@@ -165,7 +165,7 @@ def build_publisher(root: Path | None = None) -> Publisher:  # pragma: no cover
     return Publisher(exporter, agent_name=policy.resolved_agent_name(), rates=rates)
 
 
-def main() -> None:  # pragma: no cover — process entrypoint
+def main() -> None:  # pragma: no cover; process entrypoint
     logging.basicConfig(level=logging.INFO)
     ensure_dirs()
     assert_wal_dir_safe(wal_dir())

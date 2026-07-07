@@ -1,7 +1,7 @@
 """CI-enforced hook latency benchmark (T12.5): p99 < 50ms per D9 eng.
 
 Measures the full run_hook path (policy load, event build, durable append,
-socket nudge attempt) — what Claude Code actually waits on.
+socket nudge attempt); what Claude Code actually waits on.
 """
 
 import json

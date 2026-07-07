@@ -1,7 +1,7 @@
 """Filesystem safety check for the WAL directory (T3.8).
 
 fsync and flock are silent no-ops (or unreliable) on Windows-drive mounts
-under WSL (DrvFS/9p) and on network filesystems — the WAL's durability
+under WSL (DrvFS/9p) and on network filesystems; the WAL's durability
 guarantee would be a lie there. The daemon refuses to operate rather than
 pretend. Notably: a repo under /mnt/c on WSL is DrvFS, which is exactly why
 the WAL lives under ~/.local/state (ext4) instead of the repo.
@@ -20,9 +20,9 @@ def filesystem_type(path: Path, mounts_text: str | None = None) -> str:
 
     macOS has no /proc; local APFS/HFS+ honor F_FULLFSYNC, so it reports
     "apfs". Unknown parsing failures return "unknown" (allowed, logged by
-    the caller) — refusal is reserved for POSITIVELY identified unsafe types.
+    the caller); refusal is reserved for POSITIVELY identified unsafe types.
     """
-    if sys.platform == "darwin":  # pragma: no cover — macOS only
+    if sys.platform == "darwin":  # pragma: no cover; macOS only
         return "apfs"
     if mounts_text is None:
         try:
