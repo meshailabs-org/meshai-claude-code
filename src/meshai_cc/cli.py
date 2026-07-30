@@ -111,7 +111,11 @@ def status(root: Path | None = None) -> str:
             f"last flush: {int(age)}s ago" if s.get("last_flush_at") else
             "last flush: never"
         )
-        lines.append(f"export failures: {s['export_failures']}")
+        lines.append(
+            f"export failures: {s['export_failures']}"
+            f" (consecutive: {s.get('consecutive_export_failures', 0)})"
+        )
+        lines.append(f"skipped events: {s.get('skipped_events', 0)}")
         lines.append(f"corrupt WAL lines: {s['corrupt_lines']}")
         lines.append(f"WAL backlog: {s.get('wal_backlog_bytes', '?')} bytes")
     except (FileNotFoundError, ValueError, KeyError):
