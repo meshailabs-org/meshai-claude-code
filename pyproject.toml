@@ -47,7 +47,7 @@ meshai-cc-daemon = "meshai_cc.daemon:main"
 dev = [
     "pytest>=8.0.0",
     "hypothesis>=6.100.0",
-    "ruff>=0.8.0",
+    "ruff>=0.8.0,<0.16",
 ]
 
 [tool.hatch.build.targets.wheel]
