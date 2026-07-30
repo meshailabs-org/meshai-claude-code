@@ -61,11 +61,28 @@ EXPORT_MAX_EVENTS = 500
 # many calls as needed and the offset is committed only after all of them
 # succeed. Safe because the server dedups on (tenant_id, span_id), so a
 # failure part-way through a read just replays those spans next pass.
-# 2,000 spans: the worst per-span body cost observed on real data is 405 B
-# (~810 KB per call), so even a 5x heavier span mix stays under 4 MiB.
 # 4 MiB of ESTIMATE: the estimator below never underestimated on real data,
 # so the real body is at most ~4 MiB, i.e. 2.5x under the cap.
-EXPORT_MAX_SPANS_PER_CALL = 2_000
+#
+# 250 spans is bounded by SERVER PROCESSING TIME, not by body size. Body size
+# alone would allow ~2,000 (worst per-span body cost observed on real data is
+# 405 B, so ~810 KB per call), and that is what this was originally set to. It
+# failed in production with read timeouts: the OTLP exporter's default timeout
+# is 10s, and the ingest endpoint does per-span dedup, insert and policy
+# evaluation, so throughput is the binding constraint, not payload size.
+#
+# Measured against the live API on 2026-07-30 with real spans from the WAL
+# (3 batches per size, median wall clock):
+#      100 spans ->  1.48s
+#      250 spans ->  2.62s
+#      500 spans ->  5.28s
+#     1000 spans -> 11.16s   ALREADY over the 10s timeout
+# ~10.5 ms/span, near-linear. 250 is the largest size keeping ~3x headroom.
+#
+# Re-measure before raising this. The safe value is a property of the server's
+# per-span cost, so it moves with ingest performance and instance size, not
+# with anything in this file.
+EXPORT_MAX_SPANS_PER_CALL = 250
 EXPORT_MAX_ESTIMATED_BYTES = 4 * 1024 * 1024
 
 # Fixed per-span protobuf overhead (ids, timestamps, kind, status, framing)
