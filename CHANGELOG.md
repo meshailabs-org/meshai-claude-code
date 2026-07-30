@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-30
+
+Fixes a production incident in which the daemon wedged permanently and sent
+~500 rejected requests/hour at the ingest endpoint while exporting nothing.
+Anyone still on 0.1.0 should upgrade: that version cannot recover on its own
+once its backlog exceeds the ingest body cap.
+
+- Size export batches by SERVER PROCESSING TIME, not payload size. 2,000 spans
+  fits the 10 MiB body cap comfortably (~817 KB) but exceeded the OTLP
+  exporter's 10s timeout, because ingest does per-span dedup, insert and policy
+  evaluation. Measured against the live API with real spans (median): 100 ->
+  1.48s, 250 -> 2.62s, 500 -> 5.28s, 1000 -> 11.16s. 250 keeps ~3x headroom and
+  is the shipped value. Re-measure before raising it; the safe number is a
+  property of the server's per-span cost, not of this package.
+
 - Fix a permanent export wedge: the daemon read a segment's whole unexported
   tail and shipped it as ONE OTLP request, so once that tail exceeded the
   ingest body cap the request was rejected, the offset never advanced, and
@@ -10,7 +25,7 @@
   max_bytes=)`, unbounded by default) and the daemon drains a segment in
   chunks, committing the offset after each one.
 - Bound the request BODY at span level, not just the read: a read's spans are
-  split across as many export calls as the 10 MiB ingest cap needs (2,000
+  split across as many export calls as the 10 MiB ingest cap needs (250
   spans or ~4 MiB of estimated body per call), and the offset is committed
   only after every call of that read succeeded. Bounding raw WAL bytes alone
   was not enough - measured against the real backlog, 1 MiB of WAL became an
