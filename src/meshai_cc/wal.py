@@ -33,6 +33,9 @@ logger = logging.getLogger("meshai-cc")
 
 SEGMENT_MAX_BYTES = 10 * 1024 * 1024
 GC_MIN_AGE_SECONDS = 3600
+# Read-ahead step used only when a single record exceeds a bounded read's
+# max_bytes; see read_segment.
+_READ_EXTEND_BYTES = 64 * 1024
 _SEGMENT_RE = re.compile(r"^(?P<session>.+)-(?P<seq>\d{6})\.jsonl$")
 _FILE_MODE = 0o600
 
@@ -152,27 +155,60 @@ class ReadResult:
     corrupt_lines: int
 
 
-def read_segment(path: Path, offset: int = 0) -> ReadResult:
+def read_segment(
+    path: Path,
+    offset: int = 0,
+    max_events: int | None = None,
+    max_bytes: int | None = None,
+) -> ReadResult:
     """Read complete, CRC-valid events from ``offset``.
 
     The offset only advances past newline-terminated lines, so a torn tail
     is re-read (and by then terminated by the next writer) rather than lost.
     Corrupt complete lines are skipped and counted.
+
+    ``max_events`` / ``max_bytes`` bound ONE call so a caller can drain a
+    large backlog in chunks; ``new_offset`` then reflects only what this
+    call actually consumed, and the next call resumes there. Both default
+    to None (unbounded), which is byte-for-byte the historical behaviour.
+    ``max_bytes`` is a soft bound: a single line longer than it is still
+    consumed whole, because a hard bound would never advance past it.
     """
+    if max_events is not None and max_events < 1:
+        raise ValueError("max_events must be >= 1 (0 could never advance)")
+    if max_bytes is not None and max_bytes < 1:
+        raise ValueError("max_bytes must be >= 1 (0 could never advance)")
     events: list[dict] = []
     corrupt = 0
     with open(path, "rb") as f:
         f.seek(offset)
-        data = f.read()
+        if max_bytes is None:
+            data = f.read()
+        else:
+            data = f.read(max_bytes)
+            # Keep extending until a line terminator is in view (or EOF):
+            # a record bigger than max_bytes must remain consumable, or the
+            # reader would wedge at this offset forever.
+            searched = 0
+            while data.find(b"\n", searched) == -1:
+                searched = len(data)
+                more = f.read(_READ_EXTEND_BYTES)
+                if not more:
+                    break
+                data += more
     # Split on \n ONLY. bytes.splitlines() also splits on \r/\x0b/\x0c,
     # and torn binary garbage containing one of those would wedge the
     # reader at this offset forever (found by Hypothesis).
     consumed = 0
     cursor = 0
     while True:
+        if max_events is not None and len(events) >= max_events:
+            break
+        if max_bytes is not None and consumed >= max_bytes:
+            break  # soft bound: at most ONE record may cross it
         newline = data.find(b"\n", cursor)
         if newline == -1:
-            break  # torn tail; do not advance past it
+            break  # torn tail (or the max_bytes cut); do not advance past it
         line = data[cursor:newline]
         cursor = newline + 1
         consumed = cursor

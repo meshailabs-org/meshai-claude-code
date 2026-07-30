@@ -79,6 +79,51 @@ def test_replay_from_any_stale_offset_loses_nothing(tmp_path_factory, cut, n):
     assert replayed == all_events[len(all_events) - len(replayed):]
 
 
+@settings(max_examples=100, deadline=None)
+@given(
+    ops=_ops,
+    max_events=st.integers(min_value=1, max_value=4),
+    max_bytes=st.integers(min_value=1, max_value=200),
+)
+def test_chunked_drain_equals_the_unbounded_read(
+    tmp_path_factory, ops, max_events, max_bytes
+):
+    """Bounded reads exist so the daemon can ship a backlog in pieces the
+    server will accept. Under ANY bounds and any interleaving of appends and
+    torn writes, draining in chunks must consume exactly what one unbounded
+    read would: same events, same order, same final offset, same corrupt
+    count; and every chunk must make progress (never wedge)."""
+    wal_dir = tmp_path_factory.mktemp("wal")
+    segment = None
+    for op, arg in ops:
+        if op == "append":
+            segment = wal.append_event(wal_dir, "s", {"i": arg, "session_id": "s"})
+        elif op == "torn" and segment is not None:
+            with open(segment, "ab") as f:
+                f.write(arg.replace(b"\n", b"x"))
+    if segment is None:
+        return
+
+    whole = wal.read_segment(segment)
+    events: list[dict] = []
+    corrupt = 0
+    offset = 0
+    while True:
+        chunk = wal.read_segment(
+            segment, offset, max_events=max_events, max_bytes=max_bytes
+        )
+        assert len(chunk.events) <= max_events
+        if not chunk.events and chunk.new_offset == offset:
+            break
+        assert chunk.new_offset > offset  # progress, always
+        events += chunk.events
+        corrupt += chunk.corrupt_lines
+        offset = chunk.new_offset
+
+    assert [e["i"] for e in events] == [e["i"] for e in whole.events]
+    assert (offset, corrupt) == (whole.new_offset, whole.corrupt_lines)
+
+
 def _line_start(path, offset: int) -> int:
     data = path.read_bytes()[:offset]
     return data.rfind(b"\n") + 1

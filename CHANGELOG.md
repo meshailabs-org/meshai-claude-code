@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Fix a permanent export wedge: the daemon read a segment's whole unexported
+  tail and shipped it as ONE OTLP request, so once that tail exceeded the
+  ingest body cap the request was rejected, the offset never advanced, and
+  every tick retried a larger payload forever (no telemetry ever landed
+  again). Reads are now bounded (`wal.read_segment(..., max_events=,
+  max_bytes=)`, unbounded by default) and the daemon drains a segment in
+  chunks, committing the offset after each one.
+- The batch halves on every consecutive failure at the same offset (span
+  fan-out per event is unbounded, so an acceptable size cannot be picked up
+  front) and resets on any success.
+- A single event whose spans can never be accepted no longer blocks the
+  events behind it: after sustained failure on a batch backed off to one
+  event (120 attempts AND 10 minutes, so an endpoint outage never
+  qualifies) it is dropped, logged, and counted. `status` now reports
+  `skipped events` and consecutive export failures.
+
 ## 0.1.0
 
 First public release. OTel-native MeshAI connector for Claude Code:
