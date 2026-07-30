@@ -84,6 +84,21 @@ class FailAfterExporter(InMemorySpanExporter):
         return super().export(spans)
 
 
+class FailNthCallExporter(InMemorySpanExporter):
+    """Fails the Nth export call (1-based) and accepts every other one."""
+
+    def __init__(self, fail_call: int) -> None:
+        super().__init__()
+        self._fail_call = fail_call
+        self.calls = 0
+
+    def export(self, spans):
+        self.calls += 1
+        if self.calls == self._fail_call:
+            return SpanExportResult.FAILURE
+        return super().export(spans)
+
+
 class PoisonExporter(InMemorySpanExporter):
     """Rejects any batch containing one specific span, however small the
     batch: a single event whose spans can never fit under the server cap."""
@@ -349,6 +364,133 @@ def test_repeated_failure_backs_the_batch_off_to_a_single_event(
     assert len(exporter.get_finished_spans()) == 4
     assert status["skipped_events"] == 0  # nothing poison: everything shipped
     assert status["wal_backlog_bytes"] == 0
+
+
+# --- Span-level chunking (the 81x fan-out) -----------------------------------
+
+
+def _fat_stop_event(root, turns):
+    """Append ONE WAL event that fans out to 1 + `turns` spans."""
+    transcript = root / "transcript.jsonl"
+    transcript.write_text(
+        "".join(
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "id": f"msg_{i}",
+                    "model": "claude-sonnet-4-6",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+            }) + "\n"
+            for i in range(turns)
+        )
+    )
+    payload = json.dumps({"session_id": "s1", "transcript_path": str(transcript)})
+    assert run_hook("Stop", payload, root=root) == 0
+
+
+def test_one_event_is_split_across_export_calls_then_committed_once(
+    tmp_path, monkeypatch
+):
+    """No bound on WAL bytes or event count can bound the body: one Stop event
+    re-reads the whole transcript, so a SINGLE event can exceed the cap by
+    itself. The span list, not just the event list, has to be chunked."""
+    monkeypatch.setattr(daemon_mod, "EXPORT_MAX_SPANS_PER_CALL", 3)
+    _fat_stop_event(tmp_path, turns=7)  # 1 event -> 8 spans
+    exporter = BatchRecorder()
+    daemon = Daemon(_publisher(exporter), root=tmp_path)
+
+    assert daemon.scan_once() == 8
+    assert exporter.batches == [3, 3, 2]  # one event, three export calls
+    segment = _segment(tmp_path)
+    assert wal.load_offsets(offsets_path(tmp_path)) == {
+        segment.name: segment.stat().st_size
+    }  # committed once, after ALL calls succeeded
+    assert Daemon(_publisher(), root=tmp_path).scan_once() == 0
+
+
+def test_estimated_size_splits_export_calls_independently_of_span_count(
+    tmp_path, monkeypatch
+):
+    """A batch of few but fat spans must split too; the count bound alone
+    cannot see attribute payloads."""
+    monkeypatch.setattr(daemon_mod, "EXPORT_MAX_ESTIMATED_BYTES", 4_000)
+    filters = FilterConfig(allow={"Bash": frozenset({"tool_input"})})
+    payload = json.dumps({
+        "session_id": "s1", "tool_name": "Bash", "tool_input": "x" * 1_500,
+    })
+    for _ in range(4):
+        assert run_hook("PreToolUse", payload, root=tmp_path) == 0
+    exporter = BatchRecorder()
+    daemon = Daemon(_publisher(exporter, filters=filters), root=tmp_path)
+
+    assert daemon.scan_once() == 4
+    # ~1.9 KB estimated per span, so two per call: 4 spans, 2 calls.
+    assert exporter.batches == [2, 2]
+
+
+def test_failure_mid_span_sequence_does_not_advance_the_offset(
+    tmp_path, monkeypatch
+):
+    """A partial failure inside ONE read must not commit: the accepted spans
+    are replayed and deduped server-side on (tenant_id, span_id)."""
+    monkeypatch.setattr(daemon_mod, "EXPORT_MAX_SPANS_PER_CALL", 3)
+    _fat_stop_event(tmp_path, turns=7)  # 1 event -> 8 spans -> 3 calls
+    exporter = FailNthCallExporter(fail_call=2)
+    daemon = Daemon(_publisher(exporter), root=tmp_path)
+
+    assert daemon.scan_once() == 3  # only the first call landed
+    assert exporter.calls == 2  # aborted at the failure, no third call
+    assert wal.load_offsets(offsets_path(tmp_path)) == {}  # NOT advanced
+
+    # Next pass replays the whole read; the same 8 span ids are re-sent, so
+    # the 3 that already landed are a server-side no-op.
+    assert daemon.scan_once() == 8
+    segment = _segment(tmp_path)
+    assert wal.load_offsets(offsets_path(tmp_path))[segment.name] == (
+        segment.stat().st_size
+    )
+    assert len({s.context.span_id for s in exporter.get_finished_spans()}) == 8
+
+
+def test_span_size_estimate_is_never_under_the_real_protobuf_size(tmp_path):
+    """Guards the _SPAN_PROTOBUF_OVERHEAD calibration: if the span shape
+    changes, the bound must stay conservative or 413s come back."""
+    encoder = pytest.importorskip(
+        "opentelemetry.exporter.otlp.proto.common.trace_encoder"
+    )
+    filters = FilterConfig(allow={"Bash": frozenset({"tool_input"})})
+    publisher = _publisher(filters=filters)
+    events = [
+        make_event("PreToolUse", {
+            "session_id": "s1", "tool_name": "Bash",
+            "tool_input": "ls", "cwd": "/repo",
+        }),
+        make_event("PreToolUse", {
+            "session_id": "s1", "tool_name": "Bash",
+            "tool_input": "echo " + "é" * 400,  # non-ASCII: 2 UTF-8 bytes each
+        }),
+    ]
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(
+        "".join(
+            json.dumps({
+                "type": "assistant",
+                "message": {"id": f"m{i}", "model": "claude-sonnet-4-6",
+                            "usage": {"input_tokens": 9_999_999,
+                                      "output_tokens": 8_888_888}},
+            }) + "\n"
+            for i in range(50)
+        )
+    )
+    events.append(make_event("Stop", {
+        "session_id": "s1", "transcript_path": str(transcript),
+    }))
+    spans = [s for e in events for s in publisher.spans_for_event(e)]
+
+    estimated = sum(daemon_mod._estimated_span_bytes(s) for s in spans)
+    actual = len(encoder.encode_spans(spans).SerializePartialToString())
+    assert estimated >= actual, f"estimate {estimated} under actual {actual}"
 
 
 def test_poison_event_is_skipped_counted_and_unblocks_the_rest(

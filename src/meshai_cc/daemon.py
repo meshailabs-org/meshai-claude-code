@@ -2,11 +2,11 @@
 
 Pure reader of the WAL: hooks own writes; this process converts and ships.
 Startup order matters: filesystem safety check → PID lock → exporter.
-The loop wakes on a unix-socket nudge or the 1s polling backstop, exports
-new events per segment in BOUNDED chunks, and advances the committed offset
-ONLY after a successful OTLP export, but after EVERY successful chunk, so
-a failure late in a drain never un-commits what already landed. A crash
-anywhere replays, and the server dedups. An unbounded batch was the
+The loop wakes on a unix-socket nudge or the 1s polling backstop, reads new
+events per segment in BOUNDED chunks, splits each chunk's spans across as
+many BOUNDED export calls as the body cap needs, and advances the committed
+offset ONLY after every call of that chunk succeeded. A crash or partial
+failure anywhere replays, and the server dedups. An unbounded batch was the
 2026-07-29 wedge: one payload over the server's body cap is rejected
 forever, and the retry only grows.
 
@@ -44,15 +44,38 @@ POLL_SECONDS = 1.0
 GC_EVERY_SECONDS = 300.0
 HEARTBEAT_EVERY_SECONDS = 300.0
 
-# Chunk bounds for one export. The ingest endpoint rejects bodies over
-# 10 MiB with HTTP 413, and a rejected batch is retried unchanged forever,
-# so an unbounded batch is a permanent wedge (the 2026-07-29 incident).
-# Bound by RAW WAL BYTES because that is the only size we can measure
-# without reaching into OTel's encoders; one event can fan out to several
-# spans (a Stop event also yields one usage span per assistant turn), so
-# 1 MiB of WAL leaves ~10x headroom under the server cap.
+# Two independent bound layers, because they bound different things.
+#
+# READ bounds: how much WAL one read consumes. These give offset granularity
+# and bound one read's cost; they CANNOT bound the request body. Measured
+# against the real backlog, 1 MiB of WAL became an 81 MB protobuf body (81x,
+# not the ~10x first assumed) because a Stop event re-reads the whole
+# transcript and emits a usage span per turn: the backlog holds a single
+# event that fans out to 3,397 spans / 1.38 MB on its own. No bound on raw
+# bytes or event count can keep a body under the cap.
 EXPORT_MAX_BYTES = 1 * 1024 * 1024
 EXPORT_MAX_EVENTS = 500
+
+# BODY bounds: how much goes in one export call. The ingest endpoint rejects
+# bodies over 10 MiB with HTTP 413, so a read's spans are split across as
+# many calls as needed and the offset is committed only after all of them
+# succeed. Safe because the server dedups on (tenant_id, span_id), so a
+# failure part-way through a read just replays those spans next pass.
+# 2,000 spans: the worst per-span body cost observed on real data is 405 B
+# (~810 KB per call), so even a 5x heavier span mix stays under 4 MiB.
+# 4 MiB of ESTIMATE: the estimator below never underestimated on real data,
+# so the real body is at most ~4 MiB, i.e. 2.5x under the cap.
+EXPORT_MAX_SPANS_PER_CALL = 2_000
+EXPORT_MAX_ESTIMATED_BYTES = 4 * 1024 * 1024
+
+# Fixed per-span protobuf overhead (ids, timestamps, kind, status, framing)
+# plus the width charged for a non-string attribute value. Calibrated against
+# 184 real batches from the production backlog, encoded with OTel's own
+# encoder: estimate/actual landed in [1.01, 2.04], i.e. conservative, never
+# under. Estimating is deliberate: calling encode_spans() to get the true
+# size would serialize every span twice on the hot path.
+_SPAN_PROTOBUF_OVERHEAD = 384
+_NUMERIC_ATTR_BYTES = 16
 
 # A batch already backed off to ONE event that still fails this many times,
 # over at least this much wall time, is treated as poison and skipped.
@@ -63,6 +86,25 @@ EXPORT_MAX_EVENTS = 500
 # idle-socket drop), so an outage recovers long before anything is dropped.
 POISON_MIN_FAILURES = 120
 POISON_MIN_STALL_SECONDS = 600.0
+
+
+def _estimated_span_bytes(span) -> int:
+    """Cheap upper estimate of one span's contribution to the request body."""
+    total = _SPAN_PROTOBUF_OVERHEAD + len(span.name)
+    for key, value in (span.attributes or {}).items():
+        total += len(key)
+        if isinstance(value, str):
+            # protobuf stores UTF-8 bytes but len() counts code points, so a
+            # non-ASCII tool output would undercount by up to 4x. isascii()
+            # is an O(1) flag check on CPython, so the ASCII case stays free.
+            total += (
+                len(value)
+                if value.isascii()
+                else len(value.encode("utf-8", "replace"))
+            )
+        else:
+            total += _NUMERIC_ATTR_BYTES
+    return total
 
 
 class Daemon:
@@ -145,22 +187,21 @@ class Daemon:
         return exported
 
     def _drain_segment(self, segment: Path) -> tuple[int, bool]:
-        """Export a segment in bounded chunks, committing after EACH chunk.
+        """Export a segment in bounded reads, committing after EACH read.
 
-        Returns (spans exported, endpoint looks healthy). Committing per
-        chunk is what stops a failure late in the drain from replaying (and
-        re-growing) the chunks that already landed.
+        Returns (spans exported, endpoint looks healthy). Committing per read
+        is what stops a failure late in the drain from replaying (and
+        re-growing) the reads that already landed.
         """
         exported = 0
         while True:
             offset = self._offsets.get(segment.name, 0)
             key = (segment.name, offset)
-            # Halve the batch for every consecutive failure at this offset.
-            # Span fan-out per event is not knowable up front (each Stop
-            # event re-emits a usage span per transcript turn), so a fixed
-            # event count cannot guarantee an acceptable body: back off to
-            # find one in ~log2 ticks, down to a single event, which also
-            # isolates a poison event. Any success resets to the full chunk.
+            # Halve the read for every consecutive failure at this offset.
+            # The body is bounded at span level, so this is a safety net
+            # rather than the mechanism; it should essentially never fire.
+            # What it still buys is isolation: backing off to a single event
+            # is what lets the poison gate below identify one bad event.
             failures = self._stall_failures if self._stall_key == key else 0
             try:
                 result = wal.read_segment(
@@ -174,11 +215,11 @@ class Daemon:
             self._stats["corrupt_lines"] += result.corrupt_lines
             if not result.events and result.new_offset == offset:
                 return exported, True  # nothing consumable (empty or torn tail)
-            spans = self._spans_for(result.events)
-            if self._publisher.export(spans):
+            ok, accepted = self._export_in_calls(result.events)
+            exported += accepted
+            self._stats["exported_spans"] += accepted
+            if ok:
                 self._commit(segment.name, result.new_offset)
-                exported += len(spans)
-                self._stats["exported_spans"] += len(spans)
                 self._stats["last_flush_at"] = time.time()
                 self._clear_stall()
                 continue
@@ -186,13 +227,14 @@ class Daemon:
             if self._note_stall(key) and len(result.events) == 1:
                 logger.error(
                     "meshai-cc: dropping 1 poison WAL event after %d failed "
-                    "exports over %ds (%s @ %d, %d spans); it will never be "
-                    "accepted and was blocking every later event",
+                    "exports over %ds (%s @ %d, %d of its spans accepted "
+                    "before the rejection); it will never be accepted and was "
+                    "blocking every later event",
                     self._stall_failures,
                     int(time.time() - self._stall_since),
                     segment.name,
                     offset,
-                    len(spans),
+                    accepted,
                 )
                 self._stats["skipped_events"] += 1
                 self._commit(segment.name, result.new_offset)
@@ -200,14 +242,48 @@ class Daemon:
                 continue
             return exported, False
 
-    def _spans_for(self, events: list[dict]) -> list:
-        spans: list = []
+    def _export_in_calls(self, events: list[dict]) -> tuple[bool, int]:
+        """Ship one read's spans in as many bounded export calls as needed.
+
+        Returns (every call succeeded, spans accepted). The caller commits the
+        offset only on full success; the spans a partial failure already
+        landed are simply replayed next pass and deduped server-side on
+        (tenant_id, span_id). Spans accumulate as events are converted rather
+        than being materialised for the whole read, so one event fanning out
+        to thousands of spans costs one batch of memory, not thousands.
+        """
+        batch: list = []
+        batch_bytes = 0
+        accepted = 0
         for event in events:
-            try:
-                spans.extend(self._publisher.spans_for_event(event))
-            except Exception:  # noqa: BLE001; one bad event can't stall the WAL
-                logger.warning("meshai-cc: unconvertible event", exc_info=True)
-        return spans
+            for span in self._spans_for_event(event):
+                span_bytes = _estimated_span_bytes(span)
+                # Flush BEFORE appending, so a single span over the byte bound
+                # is sent alone instead of wedging: the same soft-bound rule
+                # wal.read_segment uses for an over-long line. If even alone
+                # it is rejected, the poison gate is the backstop.
+                if batch and (
+                    len(batch) >= EXPORT_MAX_SPANS_PER_CALL
+                    or batch_bytes + span_bytes > EXPORT_MAX_ESTIMATED_BYTES
+                ):
+                    if not self._publisher.export(batch):
+                        return False, accepted
+                    accepted += len(batch)
+                    batch, batch_bytes = [], 0
+                batch.append(span)
+                batch_bytes += span_bytes
+        if batch:
+            if not self._publisher.export(batch):
+                return False, accepted
+            accepted += len(batch)
+        return True, accepted
+
+    def _spans_for_event(self, event: dict) -> list:
+        try:
+            return self._publisher.spans_for_event(event)
+        except Exception:  # noqa: BLE001; one bad event can't stall the WAL
+            logger.warning("meshai-cc: unconvertible event", exc_info=True)
+            return []
 
     def _commit(self, segment_name: str, new_offset: int) -> None:
         self._offsets[segment_name] = new_offset
