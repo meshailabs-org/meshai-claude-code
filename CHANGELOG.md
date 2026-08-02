@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-02
+
+Telemetry now exports to `https://ingest.meshai.dev` instead of
+`api.meshai.dev`. Minor rather than patch: the default destination changes, so
+behaviour differs for anyone who upgrades without reading.
+
+The gateway is an OpenTelemetry collector that absorbs large exports and
+re-chunks them into small batches before they reach the API. An export the API
+would have rejected with 413 is delivered instead. This is the same class of
+problem 0.1.1 fixed from the client side, now addressed on the server side too.
+
+- Telemetry exports to the ingest gateway; `base_url` is unchanged and still
+  serves rate-card fetches and heartbeats.
+- New optional `ingest_url` in `policy.yaml` overrides the destination.
+- Self-hosted and localhost `base_url` values keep their own telemetry: only the
+  default production host is redirected, so a self-hoster's spans are never
+  silently shipped to MeshAI.
+- Stopped tracking compiled bytecode; `__pycache__` was never gitignored, so 23
+  `.pyc` files were tracked in a package that publishes to PyPI.
+
 ## 0.1.1 - 2026-07-30
 
 Fixes a production incident in which the daemon wedged permanently and sent
