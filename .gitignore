@@ -1,0 +1,8 @@
+
+# Compiled bytecode. These were tracked, which risks shipping stale .pyc
+# alongside the source in a package that publishes to PyPI.
+__pycache__/
+*.py[cod]
+
+# Local git worktrees created by tooling; never part of the package.
+.worktree-*/
