@@ -12,6 +12,10 @@ from meshai_cc.paths import config_dir
 logger = logging.getLogger("meshai-cc")
 
 
+_DEFAULT_API_URL = "https://api.meshai.dev"
+_DEFAULT_INGEST_URL = "https://ingest.meshai.dev"
+
+
 @dataclass(frozen=True)
 class Policy:
     fail_closed: bool = False
@@ -19,9 +23,27 @@ class Policy:
     auto_start_daemon: bool = True
     agent_name: str = ""
     base_url: str = "https://api.meshai.dev"
+    # Telemetry goes to the collector gateway, not the API host. The gateway
+    # absorbs large exports and re-chunks them before the API sees them, so a
+    # batch the API would 413 is delivered instead. None = decide automatically.
+    ingest_url: str | None = None
 
     def resolved_agent_name(self) -> str:
         return self.agent_name or f"claude-code-{socket.gethostname()}"
+
+    def resolved_ingest_url(self) -> str:
+        """Base URL for OTLP export.
+
+        Explicit ``ingest_url`` wins. Otherwise only the DEFAULT production
+        host is redirected: someone who pointed ``base_url`` at localhost or a
+        self-hosted deployment must keep their telemetry there rather than
+        having it silently shipped to MeshAI.
+        """
+        if self.ingest_url:
+            return self.ingest_url
+        if self.base_url == _DEFAULT_API_URL:
+            return _DEFAULT_INGEST_URL
+        return self.base_url
 
 
 def load_policy(root: Path | None = None) -> Policy:
@@ -45,7 +67,8 @@ def load_policy(root: Path | None = None) -> Policy:
             ),
             auto_start_daemon=bool(raw.get("auto_start_daemon", True)),
             agent_name=str(raw.get("agent_name", "") or ""),
-            base_url=str(raw.get("base_url", "https://api.meshai.dev")),
+            base_url=str(raw.get("base_url", _DEFAULT_API_URL)),
+            ingest_url=(str(raw["ingest_url"]) if raw.get("ingest_url") else None),
         )
     except Exception:  # noqa: BLE001
         logger.warning("meshai-cc: unparseable %s; using defaults", path)

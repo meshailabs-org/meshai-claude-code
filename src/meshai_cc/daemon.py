@@ -349,7 +349,7 @@ def build_publisher(root: Path | None = None) -> Publisher:  # pragma: no cover
             "MESHAI_API_KEY."
         )
     exporter = OTLPSpanExporter(
-        endpoint=f"{policy.base_url}{_INGEST_TRACES_PATH}",
+        endpoint=f"{policy.resolved_ingest_url()}{_INGEST_TRACES_PATH}",
         headers={"Authorization": f"Bearer {api_key}"},
     )
     try:
